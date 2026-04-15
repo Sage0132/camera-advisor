@@ -129,6 +129,33 @@ const FOCAL_LABEL = {
   tele:       '長焦',
 }
 
+const BRAND_TIPS = {
+  sony: {
+    portrait:  ['開啟「即時眼部追蹤（Real-time Eye AF）」，對焦準確率大幅提升',
+                'Creative Look 推薦「FL（Film Look）」或「IN（Instant）」讓膚色更自然'],
+    landscape: ['高對比場景開啟「D-Range Optimizer（DRO）Level 3–5」避免高光過爆',
+                'Creative Look 推薦「SH（Soft High-key）」或「VV2（Vivid 2）」呈現自然風景色'],
+  },
+  canon: {
+    portrait:  ['Dual Pixel CMOS AF 提供穩定人臉追蹤，可搭配「臉部+追蹤」AF 模式',
+                'Picture Style 設為「人像」，膚色更溫暖細緻'],
+    landscape: ['Picture Style 設為「風景」提升天空藍與草地飽和度',
+                '高動態範圍場景可使用 Canon Log 保留更多細節供後製'],
+  },
+  nikon: {
+    portrait:  ['3D 追蹤 AF 可持續鎖定移動中的人物，適合動態人像',
+                'Picture Control 設為「人像」柔化皮膚質感，減少雜訊顆粒感'],
+    landscape: ['Active D-Lighting 保留暗部細節，避免逆光場景剪影過重',
+                'Picture Control 設為「風景」加強天空藍與植被綠的色彩表現'],
+  },
+  fujifilm: {
+    portrait:  ['底片模擬推薦「PRO Neg. Hi」或「Classic Chrome」，直出人像質感優秀',
+                '開啟「臉部/眼睛偵測 AF」搭配「人臉優先」對焦，合焦率更高'],
+    landscape: ['底片模擬推薦「Velvia（正片）」讓色彩鮮豔飽滿；追求自然感選「Provia/Standard」',
+                '直出 JPEG 底片模擬效果已十分完整，不一定需要後製 RAW'],
+  },
+}
+
 // ──────────────────────────────────────────────
 //  Main Export
 // ──────────────────────────────────────────────
@@ -139,6 +166,7 @@ const FOCAL_LABEL = {
  *   localHour: number,    // 0-23
  *   shootingType: 'landscape' | 'portrait',
  *   focalLength: 'ultra_wide'|'wide'|'standard'|'mid'|'tele',
+ *   brand?: 'sony'|'canon'|'nikon'|'fujifilm'|'other',
  *   offlineMode?: boolean
  * }} params
  */
@@ -148,6 +176,7 @@ export function getRecommendedSettings({
   localHour,
   shootingType,
   focalLength,
+  brand = 'other',
   offlineMode = false,
 }) {
   // ── 1. Determine lighting token ──────────────
@@ -201,9 +230,6 @@ export function getRecommendedSettings({
   if (lightToken === 'bright_sun' && shootingType === 'portrait') {
     tips.push('強烈直射光在臉部造成陰影，建議以反光板或離機閃燈填補暗部')
     tips.push('尋找樹蔭或建築遮蔭，散射光對人像膚色更友善')
-  }
-
-  if (lightToken === 'bright_sun' && shootingType === 'portrait') {
     tips.push('大光圈（f/2.8）搭配 ND 減光鏡，可在強光下維持散景效果')
   }
 
@@ -257,7 +283,8 @@ export function getRecommendedSettings({
     shutterSpeed: base.shutter,
     iso:          base.iso,
     whiteBalance: base.wb,
-    tips:         [...new Set(tips)].slice(0, 4), // dedupe & limit
+    tips:         [...new Set(tips)].slice(0, 4),
+    brandTips:    BRAND_TIPS[brand]?.[shootingType] ?? [],
     lightToken,
     lightDescription: base.lightLabel,
     sceneName: `${base.lightLabel}・${shootingType === 'portrait' ? '人像' : '風景'}・${FOCAL_LABEL[focalLength]}`,

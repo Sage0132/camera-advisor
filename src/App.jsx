@@ -1,60 +1,78 @@
 import React, { useState, useCallback } from 'react'
 import { getRecommendedSettings, getWeatherInfo } from './utils/cameraSettings'
+import { fetchLocationInfo, getCompositionTips, getLocationLabel } from './utils/locationComposition'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const FOCAL_OPTIONS = [
-  { id: 'ultra_wide', label: '超廣角', mm: '10–20mm' },
-  { id: 'wide',       label: '廣角',   mm: '24–35mm' },
-  { id: 'standard',   label: '標準',   mm: '50mm'    },
-  { id: 'mid',        label: '中焦',   mm: '85–135mm'},
-  { id: 'tele',       label: '長焦',   mm: '150mm+'  },
+  { id: 'ultra_wide', label: '超廣角', mm: '10–20mm'  },
+  { id: 'wide',       label: '廣角',   mm: '24–35mm'  },
+  { id: 'standard',   label: '標準',   mm: '50mm'     },
+  { id: 'mid',        label: '中焦',   mm: '85–135mm' },
+  { id: 'tele',       label: '長焦',   mm: '150mm+'   },
+]
+
+const BRAND_OPTIONS = [
+  { id: 'sony',     label: 'Sony'     },
+  { id: 'canon',    label: 'Canon'    },
+  { id: 'nikon',    label: 'Nikon'    },
+  { id: 'fujifilm', label: 'Fujifilm' },
+  { id: 'other',    label: '其他'     },
 ]
 
 const PARAM_CARDS = [
-  { key: 'aperture',     icon: '◉',  label: '光圈',    unit: ''    },
-  { key: 'shutterSpeed', icon: '⏱',  label: '快門速度', unit: ''   },
-  { key: 'iso',          icon: '💡', label: 'ISO 感光度', unit: '' },
-  { key: 'whiteBalance', icon: '🎨', label: '白平衡',   unit: ''   },
+  { key: 'aperture',     icon: '◉',  label: '光圈'       },
+  { key: 'shutterSpeed', icon: '⏱',  label: '快門速度'   },
+  { key: 'iso',          icon: '💡', label: 'ISO 感光度' },
+  { key: 'whiteBalance', icon: '🎨', label: '白平衡'     },
 ]
 
-// ── Helper: format local time ─────────────────────────────────────────────────
 function formatTime(date) {
   return date.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 // ── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [locationStatus, setLocationStatus]   = useState('idle')
-  const [coords, setCoords]                   = useState(null)
-  const [weather, setWeather]                 = useState(null)
-  const [weatherStatus, setWeatherStatus]     = useState('idle')
-  const [weatherError, setWeatherError]       = useState(null)
-  const [shootingType, setShootingType]       = useState('landscape')
-  const [focalLength, setFocalLength]         = useState('wide')
-  const [result, setResult]                   = useState(null)
-  const [lastFetchTime, setLastFetchTime]     = useState(null)
+  const [locationStatus, setLocationStatus] = useState('idle')
+  const [coords, setCoords]                 = useState(null)
+  const [weather, setWeather]               = useState(null)
+  const [weatherStatus, setWeatherStatus]   = useState('idle')
+  const [weatherError, setWeatherError]     = useState(null)
+  const [locationInfo, setLocationInfo]     = useState(null)
+  const [shootingType, setShootingType]     = useState('landscape')
+  const [focalLength, setFocalLength]       = useState('wide')
+  const [brand, setBrand]                   = useState('sony')
+  const [result, setResult]                 = useState(null)
+  const [lastFetchTime, setLastFetchTime]   = useState(null)
 
-  // ── Weather fetch ──────────────────────────────────────────────────────────
-  const fetchWeather = useCallback(async (lat, lon) => {
+  // ── Fetch weather + location info in parallel ─────────────────────────────
+  const fetchEnvironment = useCallback(async (lat, lon) => {
     setWeatherStatus('loading')
     setWeatherError(null)
-    try {
-      const res = await fetch(
+
+    const [weatherResult, locationResult] = await Promise.allSettled([
+      fetch(
         `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
         `&current=temperature_2m,weather_code,wind_speed_10m,is_day&timezone=auto`
-      )
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      setWeather(data.current)
+      ).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() }),
+      fetchLocationInfo(lat, lon),
+    ])
+
+    if (weatherResult.status === 'fulfilled') {
+      setWeather(weatherResult.value.current)
       setWeatherStatus('success')
       setLastFetchTime(new Date())
-    } catch (e) {
+    } else {
       setWeatherStatus('error')
-      setWeatherError(e.message)
+      setWeatherError(weatherResult.reason?.message ?? '未知錯誤')
+    }
+
+    // Location info failure is non-critical — silently ignore
+    if (locationResult.status === 'fulfilled') {
+      setLocationInfo(locationResult.value)
     }
   }, [])
 
-  // ── Get location ───────────────────────────────────────────────────────────
+  // ── Get GPS location ──────────────────────────────────────────────────────
   const handleGetLocation = useCallback(() => {
     if (!navigator.geolocation) {
       setLocationStatus('unsupported')
@@ -67,52 +85,61 @@ export default function App() {
         const { latitude: lat, longitude: lon } = pos.coords
         setCoords({ lat, lon })
         setLocationStatus('granted')
-        fetchWeather(lat, lon)
+        fetchEnvironment(lat, lon)
       },
-      err => {
-        setLocationStatus(err.code === 1 ? 'denied' : 'error')
-      },
+      err => setLocationStatus(err.code === 1 ? 'denied' : 'error'),
       { timeout: 10000, maximumAge: 60000 }
     )
-  }, [fetchWeather])
+  }, [fetchEnvironment])
 
-  // ── Retry weather only ────────────────────────────────────────────────────
   const handleRetryWeather = useCallback(() => {
-    if (coords) fetchWeather(coords.lat, coords.lon)
-  }, [coords, fetchWeather])
+    if (coords) fetchEnvironment(coords.lat, coords.lon)
+  }, [coords, fetchEnvironment])
 
-  // ── Offline mode (time-only) ───────────────────────────────────────────────
+  // ── Offline mode ──────────────────────────────────────────────────────────
   const handleOfflineAnalyze = useCallback(() => {
     const localHour = new Date().getHours()
-    setResult(getRecommendedSettings({
-      weatherCode: 3,
-      isDay: localHour >= 6 && localHour < 20 ? 1 : 0,
-      localHour,
-      shootingType,
-      focalLength,
-      offlineMode: true,
-    }))
-  }, [shootingType, focalLength])
+    setResult({
+      ...getRecommendedSettings({
+        weatherCode: 3,
+        isDay: localHour >= 6 && localHour < 20 ? 1 : 0,
+        localHour,
+        shootingType,
+        focalLength,
+        brand,
+        offlineMode: true,
+      }),
+      compositionTips: null,
+      locationInfo: null,
+    })
+  }, [shootingType, focalLength, brand])
 
-  // ── Analyze ────────────────────────────────────────────────────────────────
+  // ── Analyze ───────────────────────────────────────────────────────────────
   const handleAnalyze = useCallback(() => {
     if (!weather) return
     const localHour = new Date().getHours()
-    setResult(getRecommendedSettings({
-      weatherCode:  weather.weather_code,
-      isDay:        weather.is_day,
-      localHour,
-      shootingType,
-      focalLength,
-    }))
-  }, [weather, shootingType, focalLength])
+    setResult({
+      ...getRecommendedSettings({
+        weatherCode:  weather.weather_code,
+        isDay:        weather.is_day,
+        localHour,
+        shootingType,
+        focalLength,
+        brand,
+      }),
+      compositionTips: locationInfo
+        ? getCompositionTips(locationInfo.locationType, shootingType)
+        : null,
+      locationInfo,
+    })
+  }, [weather, shootingType, focalLength, brand, locationInfo])
 
-  // ── Status badge ───────────────────────────────────────────────────────────
+  // ── Derived display values ────────────────────────────────────────────────
   const weatherBadge = {
-    idle:    { text: '等待中',    cls: 'bg-slate-600 text-slate-300' },
-    loading: { text: '載入中…',   cls: 'bg-blue-600 text-blue-100'   },
-    success: { text: '已更新',    cls: 'bg-emerald-600 text-white'   },
-    error:   { text: '失敗',      cls: 'bg-red-600 text-white'       },
+    idle:    { text: '等待中',  cls: 'bg-slate-600 text-slate-300' },
+    loading: { text: '載入中…', cls: 'bg-blue-600 text-blue-100'  },
+    success: { text: '已更新',  cls: 'bg-emerald-600 text-white'  },
+    error:   { text: '失敗',    cls: 'bg-red-600 text-white'      },
   }[weatherStatus] ?? { text: weatherStatus, cls: 'bg-slate-600 text-slate-300' }
 
   const weatherInfo = weather ? getWeatherInfo(weather.weather_code) : null
@@ -144,7 +171,6 @@ export default function App() {
             </span>
           </div>
 
-          {/* Weather summary */}
           {weatherStatus === 'success' && weather && (
             <div className="mb-3 p-3 bg-slate-700/50 rounded-xl space-y-1.5">
               <div className="flex items-center gap-3">
@@ -156,15 +182,19 @@ export default function App() {
                     {weather.is_day ? '白天' : '夜晚'}
                   </p>
                 </div>
+                {locationInfo && (
+                  <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 flex-shrink-0">
+                    {getLocationLabel(locationInfo.locationType)}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2 text-xs text-slate-500 pt-1 border-t border-slate-600">
-                <span>📍 {coords?.lat.toFixed(3)}, {coords?.lon.toFixed(3)}</span>
+                <span>📍 {locationInfo?.placeLabel ?? `${coords?.lat.toFixed(3)}, ${coords?.lon.toFixed(3)}`}</span>
                 <span className="ml-auto">🕐 {lastFetchTime && formatTime(lastFetchTime)} 更新</span>
               </div>
             </div>
           )}
 
-          {/* Error states */}
           {locationStatus === 'denied' && (
             <div className="mb-3 p-3 bg-red-900/40 border border-red-700/50 rounded-xl text-sm text-red-300">
               位置存取被拒絕，請在瀏覽器設定中允許位置存取後重試
@@ -189,7 +219,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Main action button */}
           {locationStatus !== 'granted' || weatherStatus !== 'success' ? (
             <button
               onClick={handleGetLocation}
@@ -214,7 +243,6 @@ export default function App() {
             </button>
           )}
 
-          {/* Offline fallback */}
           {(locationStatus === 'denied' || locationStatus === 'error' || locationStatus === 'unsupported') && (
             <button
               onClick={handleOfflineAnalyze}
@@ -274,6 +302,26 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          {/* Camera brand */}
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">相機廠牌</p>
+            <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5">
+              {BRAND_OPTIONS.map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => setBrand(id)}
+                  className={`flex-shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95
+                    ${brand === id
+                      ? 'bg-amber-500 text-slate-900 shadow-lg shadow-amber-500/20'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* ── Analyze Button ── */}
@@ -292,7 +340,7 @@ export default function App() {
         {/* ── Result Card ── */}
         {result && (
           <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
-            {/* Result header */}
+            {/* Header */}
             <div className="bg-gradient-to-r from-amber-500/20 to-transparent border-b border-slate-700 px-4 py-3 flex items-center justify-between">
               <div>
                 <p className="font-bold text-white text-sm">{result.lightDescription}</p>
@@ -320,15 +368,58 @@ export default function App() {
               ))}
             </div>
 
-            {/* Tips */}
+            {/* General tips */}
             {result.tips.length > 0 && (
-              <div className="px-4 pb-4">
+              <div className="px-4 pb-3">
                 <div className="bg-slate-700/40 rounded-xl p-3">
                   <p className="text-xs font-semibold text-amber-400 mb-2">💡 拍攝提示</p>
                   <ul className="space-y-1.5">
                     {result.tips.map((tip, i) => (
                       <li key={i} className="flex gap-2 text-xs text-slate-300 leading-relaxed">
                         <span className="text-amber-500 mt-0.5 flex-shrink-0">·</span>
+                        <span>{tip}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* Brand tips */}
+            {result.brandTips.length > 0 && (
+              <div className="px-4 pb-3">
+                <div className="bg-slate-700/40 rounded-xl p-3">
+                  <p className="text-xs font-semibold text-violet-400 mb-2">
+                    📷 {BRAND_OPTIONS.find(b => b.id === brand)?.label} 專屬建議
+                  </p>
+                  <ul className="space-y-1.5">
+                    {result.brandTips.map((tip, i) => (
+                      <li key={i} className="flex gap-2 text-xs text-slate-300 leading-relaxed">
+                        <span className="text-violet-400 mt-0.5 flex-shrink-0">·</span>
+                        <span>{tip}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* Composition tips */}
+            {result.compositionTips && (
+              <div className="px-4 pb-4">
+                <div className="bg-slate-700/40 rounded-xl p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold text-sky-400">📐 構圖建議</p>
+                    {result.locationInfo && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                        {getLocationLabel(result.locationInfo.locationType)}
+                      </span>
+                    )}
+                  </div>
+                  <ul className="space-y-1.5">
+                    {result.compositionTips.map((tip, i) => (
+                      <li key={i} className="flex gap-2 text-xs text-slate-300 leading-relaxed">
+                        <span className="text-sky-400 mt-0.5 flex-shrink-0">·</span>
                         <span>{tip}</span>
                       </li>
                     ))}
