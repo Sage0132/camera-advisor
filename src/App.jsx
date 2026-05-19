@@ -19,6 +19,24 @@ const BRAND_OPTIONS = [
   { id: 'other',    label: '其他'     },
 ]
 
+const SHOOTING_TYPES = [
+  { id: 'landscape', icon: '🏔️', label: '風景',        recommended: ['ultra_wide', 'wide', 'standard'], lensNote: '超廣角～標準焦段，涵蓋寬廣場景' },
+  { id: 'portrait',  icon: '👤', label: '人像',        recommended: ['standard', 'mid', 'tele'],         lensNote: '85mm+ 中長焦，背景壓縮自然' },
+  { id: 'stage',     icon: '🎭', label: '舞台/演唱會',  recommended: ['standard', 'mid'],                lensNote: '大光圈定焦（f/1.4–2.8）50–135mm' },
+  { id: 'sports',    icon: '🏃', label: '運動/體育',   recommended: ['mid', 'tele'],                     lensNote: '85mm+ 長焦，捕捉遠距動態' },
+  { id: 'street',    icon: '🌆', label: '街拍',        recommended: ['wide', 'standard'],                lensNote: '35–50mm 定焦，輕便低調' },
+  { id: 'wildlife',  icon: '🦅', label: '生態/野鳥',   recommended: ['tele'],                            lensNote: '150mm+ 超望遠，保持安全距離' },
+]
+
+const SHOOTING_TYPE_BADGE = {
+  landscape: { label: '🏔️ 風景',       cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+  portrait:  { label: '👤 人像',       cls: 'bg-sky-500/20 text-sky-300 border-sky-500/30'            },
+  stage:     { label: '🎭 舞台',       cls: 'bg-violet-500/20 text-violet-300 border-violet-500/30'   },
+  sports:    { label: '🏃 運動',       cls: 'bg-orange-500/20 text-orange-300 border-orange-500/30'   },
+  street:    { label: '🌆 街拍',       cls: 'bg-rose-500/20 text-rose-300 border-rose-500/30'         },
+  wildlife:  { label: '🦅 生態',       cls: 'bg-teal-500/20 text-teal-300 border-teal-500/30'         },
+}
+
 const PARAM_CARDS = [
   { key: 'aperture',     icon: '◉',  label: '光圈'       },
   { key: 'shutterSpeed', icon: '⏱',  label: '快門速度'   },
@@ -66,7 +84,6 @@ export default function App() {
       setWeatherError(weatherResult.reason?.message ?? '未知錯誤')
     }
 
-    // Location info failure is non-critical — silently ignore
     if (locationResult.status === 'fulfilled') {
       setLocationInfo(locationResult.value)
     }
@@ -143,6 +160,8 @@ export default function App() {
   }[weatherStatus] ?? { text: weatherStatus, cls: 'bg-slate-600 text-slate-300' }
 
   const weatherInfo = weather ? getWeatherInfo(weather.weather_code) : null
+  const currentShootingType = SHOOTING_TYPES.find(t => t.id === shootingType)
+  const isLensRecommended = currentShootingType?.recommended.includes(focalLength) ?? true
 
   // ────────────────────────────────────────────────────────────────────────────
   return (
@@ -258,12 +277,9 @@ export default function App() {
         <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-4">
           {/* Shooting type */}
           <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">拍攝類型</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">拍攝情境</p>
             <div className="grid grid-cols-2 gap-2">
-              {[
-                { id: 'landscape', icon: '🏔️', label: '風景' },
-                { id: 'portrait',  icon: '👤', label: '人像' },
-              ].map(({ id, icon, label }) => (
+              {SHOOTING_TYPES.map(({ id, icon, label }) => (
                 <button
                   key={id}
                   onClick={() => setShootingType(id)}
@@ -278,6 +294,23 @@ export default function App() {
                 </button>
               ))}
             </div>
+
+            {/* Lens recommendation */}
+            {currentShootingType && (
+              <div className={`mt-2 p-3 rounded-xl text-xs ${
+                isLensRecommended
+                  ? 'bg-emerald-900/40 border border-emerald-700/50 text-emerald-300'
+                  : 'bg-amber-900/40 border border-amber-700/50 text-amber-300'
+              }`}>
+                <p className="font-semibold mb-0.5">
+                  {isLensRecommended ? '✅ 推薦鏡頭' : '💡 建議鏡頭'}
+                </p>
+                <p>{currentShootingType.lensNote}</p>
+                {!isLensRecommended && (
+                  <p className="mt-1 opacity-75">目前焦段非此情境最佳選擇，可參考上方說明調整</p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Focal length */}
@@ -346,13 +379,14 @@ export default function App() {
                 <p className="font-bold text-white text-sm">{result.lightDescription}</p>
                 <p className="text-slate-400 text-xs mt-0.5">{result.sceneName}</p>
               </div>
-              <span className={`text-xs px-2.5 py-1 rounded-full font-semibold
-                ${shootingType === 'portrait'
-                  ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
-                  : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                }`}>
-                {shootingType === 'portrait' ? '👤 人像' : '🏔️ 風景'}
-              </span>
+              {(() => {
+                const badge = SHOOTING_TYPE_BADGE[shootingType] ?? { label: shootingType, cls: 'bg-slate-500/20 text-slate-300 border-slate-500/30' }
+                return (
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-semibold border ${badge.cls}`}>
+                    {badge.label}
+                  </span>
+                )
+              })()}
             </div>
 
             {/* Parameter grid */}
